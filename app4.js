@@ -8,11 +8,13 @@ const bodyParser = require('body-parser');
 const app = express();
 
 const corsOptions = {
-    origin: 'https://your-netlify-app.netlify.app', // Netlify app URL
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    credentials: true, // Allow credentials (cookies, authorization headers, etc.)
-    optionsSuccessStatus: 204 // Some legacy browsers (IE11, various SmartTVs) choke on 204
+    origin: '*', // Allow requests from any origin
+    methods: 'POST, GET, OPTIONS, PUT, DELETE', // Allow specified methods
+    allowedHeaders: 'Content-Type', // Allow specified headers
 };
+
+// Use CORS middleware with the specified options
+app.use(cors(corsOptions));
 
 app.use(cors(corsOptions));
 app.use(bodyParser.json({
