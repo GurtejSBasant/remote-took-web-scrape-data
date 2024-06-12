@@ -45,10 +45,12 @@ async function scrapeRemoteJobs(searchTerm) {
         while (true) {
             previousHeight = await page.evaluate('document.body.scrollHeight');
             await page.evaluate('window.scrollTo(0, document.body.scrollHeight)');
-            await page.waitForFunction(`document.body.scrollHeight > ${previousHeight}`, { timeout: 3000 })
-                .catch(() => {
-                    // If the function times out, it means no new jobs were loaded
-                });
+            await page.waitForFunction(
+                `document.body.scrollHeight > ${previousHeight}`,
+                { timeout: 3000 }
+            ).catch(() => {
+                // If the function times out, it means no new jobs were loaded
+            });
             const currentHeight = await page.evaluate('document.body.scrollHeight');
             if (currentHeight === previousHeight) break;
         }
@@ -63,21 +65,23 @@ async function scrapeRemoteJobs(searchTerm) {
             totalJobs = parseInt(matches[1], 10);
         }
 
-        // Extract job details
+        // Wait for lazy-loaded images to be visible
         $('.job').each((index, element) => {
-            const jobData = JSON.parse($(element).find('script[type="application/ld+json"]').html());
+            const jobData = JSON.parse($(element).find('script[type="application/ld+json"]').html()); // Parse JSONLD data
             const title = jobData.title;
             const company = jobData.hiringOrganization.name;
-            let location = 'Location not specified';
+            let location = 'Location not specified'; // Default value for location
 
+            // Check if job location information is available and in the expected format
             if (jobData.jobLocation && jobData.jobLocation.address && jobData.jobLocation.address.addressLocality) {
                 location = jobData.jobLocation.address.addressLocality;
             }
 
-            const tags = $(element).find('.tags').text().replace(/[\t\n]+/g, ' ').trim();
+            const tags = $(element).find('.tags').text().replace(/[\t\n]+/g, ' ').trim(); // Remove newline characters and extra spaces
             const link = 'https://remoteok.com' + $(element).find('a').attr('href');
             let logoUrl = jobData.image;
 
+            // If logoUrl is empty, extract initials from SVG data attribute
             if (!logoUrl) {
                 const initialsMatch = $(element).find('.logo.initials').text().trim();
                 if (initialsMatch) {
@@ -85,9 +89,9 @@ async function scrapeRemoteJobs(searchTerm) {
                 }
             }
 
-            if (title && company && link) {
+            if (title && company && link) { // Ensure essential fields are present
                 const job = { title, company, location, tags, link, logoUrl };
-                jobs.add(JSON.stringify(job));
+                jobs.add(JSON.stringify(job)); // Add job as a string to the Set to ensure uniqueness
             }
         });
 
@@ -102,7 +106,6 @@ async function scrapeRemoteJobs(searchTerm) {
     return { jobs: uniqueJobs, totalJobs, fetchedJobs: uniqueJobs.length };
 }
 
-// Define Routes
 app.get('/search', async (req, res) => {
     const searchTerm = req.query.term;
 
