@@ -4,7 +4,7 @@ const puppeteer = require('puppeteer');
 const axios = require('axios');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-
+const Bottleneck = require('bottleneck');
 const app = express();
 
 const corsOptions = {
@@ -29,88 +29,113 @@ app.use(bodyParser.json({
     }
 }));
 
+// Throttling using Bottleneck
+const limiter = new Bottleneck({
+    maxConcurrent: 1,  // Reduce to 1 to minimize CPU usage
+    minTime: 1000      // Increase minimum time between requests
+});
+
+// Scrape Remote Jobs Function
+// Helper function for delay
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 // Scrape Remote Jobs Function
 async function scrapeRemoteJobs(searchTerm) {
     const jobs = new Set(); // Use a Set to ensure unique job entries
     let totalJobs = 0;
     const url = `https://remoteok.com/remote-${searchTerm}-jobs`;
 
-    try {
-        const browser = await puppeteer.launch({ headless: true });
-        const page = await browser.newPage();
-        await page.setCacheEnabled(false)
-        await page.goto(url, { waitUntil: 'networkidle2' });
-
-        // Scroll and load more jobs if applicable
-        let previousHeight;
-        while (true) {
-            previousHeight = await page.evaluate('document.body.scrollHeight');
-            await page.evaluate('window.scrollTo(0, document.body.scrollHeight)');
-            await page.waitForFunction(
-                `document.body.scrollHeight > ${previousHeight}`,
-                { timeout: 3000 }
-            ).catch(() => {
-                // If the function times out, it means no new jobs were loaded
+    const scrape = async () => {
+        try {
+            const browser = await puppeteer.launch({
+                headless: true,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--disable-gpu'
+                ]
             });
-            const currentHeight = await page.evaluate('document.body.scrollHeight');
-            if (currentHeight === previousHeight) break;
-        }
+            const page = await browser.newPage();
+            await page.setCacheEnabled(false);
 
-        const html = await page.content();
-        const $ = cheerio.load(html);
+            // Intercept requests to handle CORS and throttle requests
+            await page.setRequestInterception(true);
+            page.on('request', (request) => {
+                const headers = request.headers();
+                headers['Access-Control-Allow-Origin'] = '*';
+                request.continue({ headers });
+            });
 
-        // Extract total jobs from the specific element
-        const jobsCountText = $('.action-remove-latest-filter').text().trim();
-        const matches = jobsCountText.match(/(\d+)\+?/);
-        if (matches) {
-            totalJobs = parseInt(matches[1], 10);
-        }
-        console.log("matches",matches)
+            await page.goto(url, { waitUntil: 'networkidle2' });
 
-        // Wait for lazy-loaded images to be visible
-        $('.job').each((index, element) => {
-            const jobData = JSON.parse($(element).find('script[type="application/ld+json"]').html()); // Parse JSONLD data
-            const title = jobData.title;
-            const company = jobData.hiringOrganization.name;
-            let location = 'Location not specified'; // Default value for location
-            console.log("jobData",jobData)
-            console.log("title",title)
-
-            // Check if job location information is available and in the expected format
-            if (jobData.jobLocation && jobData.jobLocation.address && jobData.jobLocation.address.addressLocality) {
-                location = jobData.jobLocation.address.addressLocality;
+            // Scroll and load more jobs if applicable
+            let previousHeight;
+            while (true) {
+                previousHeight = await page.evaluate('document.body.scrollHeight');
+                await page.evaluate('window.scrollTo(0, document.body.scrollHeight)');
+                await delay(2000); // Wait for 2 seconds between scrolls to reduce CPU usage
+                const currentHeight = await page.evaluate('document.body.scrollHeight');
+                if (currentHeight === previousHeight) break;
             }
 
-            const tags = $(element).find('.tags').text().replace(/[\t\n]+/g, ' ').trim(); // Remove newline characters and extra spaces
-            const link = 'https://remoteok.com' + $(element).find('a').attr('href');
-            let logoUrl = jobData.image;
+            const html = await page.content();
+            const $ = cheerio.load(html);
 
-            // If logoUrl is empty, extract initials from SVG data attribute
-            if (!logoUrl) {
-                const initialsMatch = $(element).find('.logo.initials').text().trim();
-                if (initialsMatch) {
-                    logoUrl = initialsMatch;
+            // Extract total jobs from the specific element
+            const jobsCountText = $('.action-remove-latest-filter').text().trim();
+            const matches = jobsCountText.match(/(\d+)\+?/);
+            if (matches) {
+                totalJobs = parseInt(matches[1], 10);
+            }
+            console.log("matches", matches);
+
+            // Extract job details
+            $('.job').each((index, element) => {
+                const jobData = JSON.parse($(element).find('script[type="application/ld+json"]').html()); // Parse JSONLD data
+                const title = jobData.title;
+                const company = jobData.hiringOrganization.name;
+                let location = 'Location not specified'; // Default value for location
+
+                // Check if job location information is available and in the expected format
+                if (jobData.jobLocation && jobData.jobLocation.address && jobData.jobLocation.address.addressLocality) {
+                    location = jobData.jobLocation.address.addressLocality;
                 }
-            }
 
-            if (title && company && link) { // Ensure essential fields are present
-                const job = { title, company, location, tags, link, logoUrl };
-                jobs.add(JSON.stringify(job)); // Add job as a string to the Set to ensure uniqueness
-            }
-        });
-       
+                const tags = $(element).find('.tags').text().replace(/[\t\n]+/g, ' ').trim(); // Remove newline characters and extra spaces
+                const link = 'https://remoteok.com' + $(element).find('a').attr('href');
+                let logoUrl = jobData.image;
 
-        await browser.close();
+                // If logoUrl is empty, extract initials from SVG data attribute
+                if (!logoUrl) {
+                    const initialsMatch = $(element).find('.logo.initials').text().trim();
+                    if (initialsMatch) {
+                        logoUrl = initialsMatch;
+                    }
+                }
 
-    } catch (error) {
-        console.error('Error scraping remote jobs:', error);
-        return { jobs: [], totalJobs: 0, fetchedJobs: 0 };
-    }
+                if (title && company && link) { // Ensure essential fields are present
+                    const job = { title, company, location, tags, link, logoUrl };
+                    jobs.add(JSON.stringify(job)); // Add job as a string to the Set to ensure uniqueness
+                }
+            });
 
-    const uniqueJobs = Array.from(jobs).map(job => JSON.parse(job));
-    return { jobs: uniqueJobs, totalJobs, fetchedJobs: uniqueJobs.length };
+            await browser.close();
+
+        } catch (error) {
+            console.error('Error scraping remote jobs:', error);
+            return { jobs: [], totalJobs: 0, fetchedJobs: 0 };
+        }
+
+        const uniqueJobs = Array.from(jobs).map(job => JSON.parse(job));
+        return { jobs: uniqueJobs, totalJobs, fetchedJobs: uniqueJobs.length };
+    };
+
+    return limiter.schedule(scrape); // Schedule the scrape with the limiter
 }
 
+// Endpoint to search for jobs
 app.get('/search', async (req, res) => {
     const searchTerm = req.query.term;
 
