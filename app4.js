@@ -70,8 +70,7 @@ async function scrapeRemoteJobs(searchTerm) {
 
 const rp = require('request-promise');
 
-// Example route handler using Express
-// Create a queue with concurrency limit
+// Create a persistent queue manager
 const queue = async.queue(async (taskData) => {
     const { url, searchTerm, callback } = taskData;
     try {
@@ -98,16 +97,17 @@ const queue = async.queue(async (taskData) => {
             jobs.push(job);
         });
 
-        // Resolve the promise with the fetched jobs
+        // Pass the fetched jobs to the callback
         callback(null, jobs);
 
     } catch (error) {
         console.error(`Error fetching jobs for ${searchTerm}:`, error);
         callback(error); // Pass error to the callback
     }
-}, 1); // Set concurrency level here (e.g., 1 for sequential processing)
+}, 1); // Set concurrency level to 1 to ensure sequential processing
 
-app.get('/search', (req, res) => {
+// Function to handle incoming requests
+const handleRequest = async (req, res, next) => {
     const searchTerm = req.query.term || 'backend'; // Default search term
     const url = `https://remoteok.com/remote-${searchTerm}-jobs`;
 
@@ -123,16 +123,18 @@ app.get('/search', (req, res) => {
     });
 
     // Handle promise resolution
-    promise.then((jobs) => {
+    try {
+        const jobs = await promise;
         // Send the fetched jobs as JSON response
         res.json(jobs);
-    }).catch((error) => {
+    } catch (error) {
         console.error('Error processing request:', error);
         res.status(500).json({ error: 'Internal server error' });
-    });
-});
+    }
+};
 
-
+// Route to handle incoming requests
+app.get('/search', handleRequest);
 
 
 // Middleware to parse JSON bodies
