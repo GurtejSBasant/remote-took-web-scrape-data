@@ -38,6 +38,7 @@ async function scrapeRemoteJobs(searchTerm) {
     try {
         const browser = await puppeteer.launch({ headless: true });
         const page = await browser.newPage();
+        await page.setCacheEnabled(false)
         await page.goto(url, { waitUntil: 'networkidle2' });
 
         // Scroll and load more jobs if applicable
@@ -64,6 +65,7 @@ async function scrapeRemoteJobs(searchTerm) {
         if (matches) {
             totalJobs = parseInt(matches[1], 10);
         }
+        console.log("matches",matches)
 
         // Wait for lazy-loaded images to be visible
         $('.job').each((index, element) => {
@@ -71,6 +73,8 @@ async function scrapeRemoteJobs(searchTerm) {
             const title = jobData.title;
             const company = jobData.hiringOrganization.name;
             let location = 'Location not specified'; // Default value for location
+            console.log("jobData",jobData)
+            console.log("title",title)
 
             // Check if job location information is available and in the expected format
             if (jobData.jobLocation && jobData.jobLocation.address && jobData.jobLocation.address.addressLocality) {
@@ -94,6 +98,7 @@ async function scrapeRemoteJobs(searchTerm) {
                 jobs.add(JSON.stringify(job)); // Add job as a string to the Set to ensure uniqueness
             }
         });
+       
 
         await browser.close();
 

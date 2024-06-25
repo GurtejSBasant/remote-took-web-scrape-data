@@ -4,12 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "nodemon index.js",
-    "start": "nodemon app2.js",
     "dev": "nodemon app4.js",
-    "start-dev": "nodemon weworkremotely.js",
-    "start-test": "nodemon b.js",
-    "ques": "nodemon question.js"
+    "test": "nodemon test.js"
+    
   },
   "author": "",
   "license": "ISC",
