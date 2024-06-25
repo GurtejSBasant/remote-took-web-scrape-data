@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon app4.js",
-    "test": "nodemon test.js"
+    "test": "nodemon test.js",
+    "work": "nodemon worker.js"
   },
   "author": "",
   "license": "ISC",
