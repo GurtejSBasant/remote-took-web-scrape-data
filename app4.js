@@ -31,11 +31,10 @@ app.use(bodyParser.json({
 
 // Throttling using Bottleneck
 const limiter = new Bottleneck({
-    maxConcurrent: 1,  // Reduce to 1 to minimize CPU usage
-    minTime: 1000      // Increase minimum time between requests
+    maxConcurrent: 1,  // Adjust concurrency as needed
+    minTime: 2000      // Increase minimum time between requests
 });
 
-// Scrape Remote Jobs Function
 // Helper function for delay
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -93,31 +92,36 @@ async function scrapeRemoteJobs(searchTerm) {
 
             // Extract job details
             $('.job').each((index, element) => {
-                const jobData = JSON.parse($(element).find('script[type="application/ld+json"]').html()); // Parse JSONLD data
-                const title = jobData.title;
-                const company = jobData.hiringOrganization.name;
-                let location = 'Location not specified'; // Default value for location
+                try {
+                    const jobData = JSON.parse($(element).find('script[type="application/ld+json"]').html()); // Parse JSONLD data
+                    const title = jobData.title;
+                    const company = jobData.hiringOrganization.name;
+                    let location = 'Location not specified'; // Default value for location
 
-                // Check if job location information is available and in the expected format
-                if (jobData.jobLocation && jobData.jobLocation.address && jobData.jobLocation.address.addressLocality) {
-                    location = jobData.jobLocation.address.addressLocality;
-                }
-
-                const tags = $(element).find('.tags').text().replace(/[\t\n]+/g, ' ').trim(); // Remove newline characters and extra spaces
-                const link = 'https://remoteok.com' + $(element).find('a').attr('href');
-                let logoUrl = jobData.image;
-
-                // If logoUrl is empty, extract initials from SVG data attribute
-                if (!logoUrl) {
-                    const initialsMatch = $(element).find('.logo.initials').text().trim();
-                    if (initialsMatch) {
-                        logoUrl = initialsMatch;
+                    // Check if job location information is available and in the expected format
+                    if (jobData.jobLocation && jobData.jobLocation.address && jobData.jobLocation.address.addressLocality) {
+                        location = jobData.jobLocation.address.addressLocality;
                     }
-                }
 
-                if (title && company && link) { // Ensure essential fields are present
-                    const job = { title, company, location, tags, link, logoUrl };
-                    jobs.add(JSON.stringify(job)); // Add job as a string to the Set to ensure uniqueness
+                    const tags = $(element).find('.tags').text().replace(/[\t\n]+/g, ' ').trim(); // Remove newline characters and extra spaces
+                    const link = 'https://remoteok.com' + $(element).find('a').attr('href');
+                    let logoUrl = jobData.image;
+
+                    // If logoUrl is empty, extract initials from SVG data attribute
+                    if (!logoUrl) {
+                        const initialsMatch = $(element).find('.logo.initials').text().trim();
+                        if (initialsMatch) {
+                            logoUrl = initialsMatch;
+                        }
+                    }
+
+                    if (title && company && link) { // Ensure essential fields are present
+                        const job = { title, company, location, tags, link, logoUrl };
+                        jobs.add(JSON.stringify(job)); // Add job as a string to the Set to ensure uniqueness
+                    }
+                } catch (err) {
+                    console.error('Error processing job element:', err);
+                    // Continue with the next element if there's an error
                 }
             });
 
@@ -151,6 +155,7 @@ app.get('/search', async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
 
 // Middleware to parse JSON bodies
 app.use(express.json());
