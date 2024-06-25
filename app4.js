@@ -6,7 +6,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const Bottleneck = require('bottleneck');
 const app = express();
-
+const async = require('async');
 const corsOptions = {
     origin: '*', // Allow requests from any origin
     methods: 'POST, GET, OPTIONS, PUT, DELETE', // Allow specified methods
@@ -71,16 +71,15 @@ async function scrapeRemoteJobs(searchTerm) {
 const rp = require('request-promise');
 
 // Example route handler using Express
-app.get('/search', async (req, res) => {
-    const searchTerm = req.query.term || 'backend'; // Default search term
-    const url = `https://remoteok.com/remote-${searchTerm}-jobs`;
-
+// Create a queue with concurrency limit
+const queue = async.queue(async (taskData) => {
+    const { url, searchTerm, callback } = taskData;
     try {
-        // Make the initial request
+        // Make the request
         const html = await rp({
             uri: url,
-            followRedirect: true, // follow redirects manually
-            maxRedirects: 10, // set a reasonable limit for redirects
+            followRedirect: true,
+            maxRedirects: 10,
         });
 
         // Load HTML content into Cheerio
@@ -99,14 +98,40 @@ app.get('/search', async (req, res) => {
             jobs.push(job);
         });
 
-        // Send the jobs as JSON response
-        res.json(jobs);
+        // Resolve the promise with the fetched jobs
+        callback(null, jobs);
 
     } catch (error) {
-        console.error('Error fetching jobs:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        console.error(`Error fetching jobs for ${searchTerm}:`, error);
+        callback(error); // Pass error to the callback
     }
+}, 1); // Set concurrency level here (e.g., 1 for sequential processing)
+
+app.get('/search', (req, res) => {
+    const searchTerm = req.query.term || 'backend'; // Default search term
+    const url = `https://remoteok.com/remote-${searchTerm}-jobs`;
+
+    // Create a promise for the queue task
+    const promise = new Promise((resolve, reject) => {
+        queue.push({ url, searchTerm, callback: (error, jobs) => {
+            if (error) {
+                reject(error);
+            } else {
+                resolve(jobs);
+            }
+        }});
+    });
+
+    // Handle promise resolution
+    promise.then((jobs) => {
+        // Send the fetched jobs as JSON response
+        res.json(jobs);
+    }).catch((error) => {
+        console.error('Error processing request:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    });
 });
+
 
 
 
