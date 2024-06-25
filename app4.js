@@ -39,122 +39,75 @@ const limiter = new Bottleneck({
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // Scrape Remote Jobs Function
+
+// Function to scrape remote jobs
+// Function to scrape remote jobs
+
+// Function to scrape remote jobs
 async function scrapeRemoteJobs(searchTerm) {
-    const jobs = new Set(); // Use a Set to ensure unique job entries
-    let totalJobs = 0;
+    const jobs = new Set();
     const url = `https://remoteok.com/remote-${searchTerm}-jobs`;
 
-    const scrape = async () => {
-        try {
-            const browser = await puppeteer.launch({
-                headless: true,
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
-                    '--disable-gpu'
-                ]
-            });
-            const page = await browser.newPage();
-            await page.setCacheEnabled(false);
+    try {
+        const response = await axios.get(url);
 
-            // Intercept requests to handle CORS and throttle requests
-            await page.setRequestInterception(true);
-            page.on('request', (request) => {
-                const headers = request.headers();
-                headers['Access-Control-Allow-Origin'] = '*';
-                request.continue({ headers });
-            });
+        const html = response.data;
+        const $ = cheerio.load(html);
 
-            await page.goto(url, { waitUntil: 'networkidle2' });
+        // Example: Extracting job titles
+        $('.job').each((index, element) => {
+            const title = $(element).find('.title').text().trim();
+            jobs.add(title);
+        });
 
-            // Scroll and load more jobs if applicable
-            let previousHeight;
-            while (true) {
-                previousHeight = await page.evaluate('document.body.scrollHeight');
-                await page.evaluate('window.scrollTo(0, document.body.scrollHeight)');
-                await delay(2000); // Wait for 2 seconds between scrolls to reduce CPU usage
-                const currentHeight = await page.evaluate('document.body.scrollHeight');
-                if (currentHeight === previousHeight) break;
-            }
+        return { jobs: Array.from(jobs), totalJobs: $('.job').length };
 
-            const html = await page.content();
-            const $ = cheerio.load(html);
-
-            // Extract total jobs from the specific element
-            const jobsCountText = $('.action-remove-latest-filter').text().trim();
-            const matches = jobsCountText.match(/(\d+)\+?/);
-            if (matches) {
-                totalJobs = parseInt(matches[1], 10);
-            }
-            console.log("matches", matches);
-
-            // Extract job details
-            $('.job').each((index, element) => {
-                try {
-                    const jobData = JSON.parse($(element).find('script[type="application/ld+json"]').html()); // Parse JSONLD data
-                    const title = jobData.title;
-                    const company = jobData.hiringOrganization.name;
-                    let location = 'Location not specified'; // Default value for location
-
-                    // Check if job location information is available and in the expected format
-                    if (jobData.jobLocation && jobData.jobLocation.address && jobData.jobLocation.address.addressLocality) {
-                        location = jobData.jobLocation.address.addressLocality;
-                    }
-
-                    const tags = $(element).find('.tags').text().replace(/[\t\n]+/g, ' ').trim(); // Remove newline characters and extra spaces
-                    const link = 'https://remoteok.com' + $(element).find('a').attr('href');
-                    let logoUrl = jobData.image;
-
-                    // If logoUrl is empty, extract initials from SVG data attribute
-                    if (!logoUrl) {
-                        const initialsMatch = $(element).find('.logo.initials').text().trim();
-                        if (initialsMatch) {
-                            logoUrl = initialsMatch;
-                        }
-                    }
-
-                    if (title && company && link) { // Ensure essential fields are present
-                        const job = { title, company, location, tags, link, logoUrl };
-                        jobs.add(JSON.stringify(job)); // Add job as a string to the Set to ensure uniqueness
-                    }
-                } catch (err) {
-                    console.error('Error processing job element:', err);
-                    // Continue with the next element if there's an error
-                }
-            });
-
-            await browser.close();
-
-        } catch (error) {
-            console.error('Error scraping remote jobs:', error);
-            return { jobs: [], totalJobs: 0, fetchedJobs: 0 };
-        }
-
-        const uniqueJobs = Array.from(jobs).map(job => JSON.parse(job));
-        return { jobs: uniqueJobs, totalJobs, fetchedJobs: uniqueJobs.length };
-    };
-
-    return limiter.schedule(scrape); // Schedule the scrape with the limiter
+    } catch (error) {
+        console.error('Error scraping remote jobs:', error);
+        return { jobs: [], totalJobs: 0 };
+    }
 }
 
-// Endpoint to search for jobs
-app.get('/search', async (req, res) => {
-    const searchTerm = req.query.term;
+const rp = require('request-promise');
 
-    if (!searchTerm) {
-        return res.status(400).json({ error: 'Please provide a search term' });
-    }
+// Example route handler using Express
+app.get('/search', async (req, res) => {
+    const searchTerm = req.query.term || 'backend'; // Default search term
+    const url = `https://remoteok.com/remote-${searchTerm}-jobs`;
 
     try {
-        const { jobs, totalJobs, fetchedJobs } = await scrapeRemoteJobs(searchTerm);
-        res.json({ jobs, totalJobs, fetchedJobs });
+        // Make the initial request
+        const html = await rp({
+            uri: url,
+            followRedirect: true, // follow redirects manually
+            maxRedirects: 10, // set a reasonable limit for redirects
+        });
+
+        // Load HTML content into Cheerio
+        const $ = cheerio.load(html);
+
+        // Extract jobs using Cheerio selectors
+        const jobs = [];
+        $('.job').each((index, element) => {
+            const title = $(element).find('h2').text().trim();
+            const company = $(element).find('.company').text().trim();
+            const location = $(element).find('.location').text().trim();
+            const link = 'https://remoteok.com' + $(element).find('a').attr('href');
+            const tags = $(element).find('.tags').text().trim();
+
+            const job = { title, company, location, link, tags };
+            jobs.push(job);
+        });
+
+        // Send the jobs as JSON response
+        res.json(jobs);
+
     } catch (error) {
         console.error('Error fetching jobs:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
 
 
 // Middleware to parse JSON bodies

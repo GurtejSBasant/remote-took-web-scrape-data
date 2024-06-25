@@ -27,6 +27,7 @@
     "puppeteer": "^22.9.0",
     "qs": "^6.12.1",
     "request": "^2.88.2",
+    "request-promise": "^4.2.6",
     "resemblejs": "^5.0.0",
     "sharp": "^0.33.4"
   }
